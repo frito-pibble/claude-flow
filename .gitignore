@@ -115,6 +115,7 @@ test-reports/
 claude-flow.config.json
 .swarm/
 .hive-mind/
+.claude-flow/metrics/
 memory/claude-flow-data.json
 memory/sessions/*
 !memory/sessions/README.md

@@ -34,6 +34,7 @@
 - TodoWrite & task management
 - Git operations & package management
 - Testing, debugging & implementation
+- **NEW: Claude Code CLI integration** (zero API costs with Pro account)
 
 ### MCP Tools ONLY:
 - Coordination & planning
@@ -43,6 +44,57 @@
 - GitHub integration
 
 **Key**: MCP coordinates, Claude Code executes!
+
+## 🔧 CLI Integration (v2.0.0 New)
+
+### **Native CLI Provider**
+Claude-Flow now uses **Claude Code CLI** instead of direct API calls:
+
+```bash
+# CLI Integration Benefits:
+✅ $0 API costs with Pro account ($20/month vs $60+ API)
+✅ No API key management required
+✅ Built-in authentication and error handling
+✅ Process pooling for better performance
+✅ Automatic Pro account detection
+```
+
+### **CLI Commands**
+New diagnostic and setup commands:
+
+```bash
+# Health check and diagnostics
+claude-flow doctor
+
+# Guided CLI setup
+claude-flow setup-cli  
+
+# Provider configuration
+claude-flow provider status
+
+# Migration from API to CLI
+claude-flow migrate-api --backup
+```
+
+### **CLI Configuration**
+Update provider settings for CLI integration:
+
+```javascript
+// Default CLI-first configuration
+{
+  "llmProvider": {
+    "type": "claude-code",         // CLI provider
+    "preferCLI": true,             // Always use CLI when available
+    "fallbackToAPI": false,        // User decides on errors
+    "cliOptions": {
+      "enableProcessReuse": true,  // Performance optimization
+      "poolSize": 5,               // Concurrent CLI processes
+      "timeout": 30000,            // 30s timeout
+      "authCheckInterval": 300000  // Check auth every 5 minutes
+    }
+  }
+}
+```
 
 ## 📦 SPARC Commands
 

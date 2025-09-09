@@ -50,18 +50,31 @@
 
 - **Node.js 18+** (LTS recommended)
 - **npm 9+** or equivalent package manager
+- **Claude Code CLI**: Required for AI integration (see below)
 - **Windows users**: See [Windows Installation Guide](https://github.com/ruvnet/claude-code-flow/blob/main/docs/windows-installation.md) for special instructions
 
-⚠️ **IMPORTANT**: Claude Code must be installed first:
+⚠️ **IMPORTANT**: Claude Code must be installed and authenticated first:
 
 ```bash
 # 1. Install Claude Code globally
 npm install -g @anthropic-ai/claude-code
 
-# 2. (Optional) Skip permissions check for faster setup
+# 2. Authenticate with your Anthropic account
+claude auth login
+
+# 3. Verify Pro account (recommended for zero costs)
+claude doctor
+
+# 4. (Optional) Skip permissions check for faster setup
 # Only use if you understand the security implications
 claude --dangerously-skip-permissions
 ```
+
+### 🎯 **CLI Integration Benefits**
+- **🔑 Zero API Keys**: Uses Claude Code CLI authentication
+- **💰 $0 API Costs**: With Pro account ($20/month vs $60+ API costs)
+- **🛡️ Enhanced Reliability**: Built-in error handling and retries
+- **⚡ Better Performance**: Process pooling and concurrent optimization
 
 💡 **Windows Note**: If you encounter SQLite errors, Claude Flow will automatically use in-memory storage. For persistent storage options, see our [Windows guide](https://github.com/ruvnet/claude-code-flow/blob/main/docs/windows-installation.md).
 
@@ -449,7 +462,34 @@ npx claude-flow@alpha github sync-coordinator align --multi-package
 
 ---
 
-## 🛡️ **Seamless Claude Code Integration**
+## 🛡️ **Revolutionary Claude Code CLI Integration**
+
+### **Native CLI Integration (v2.0.0 New)**
+v2.0.0 Alpha features **native Claude Code CLI integration**, replacing direct API calls with CLI subprocess management:
+
+```bash
+# CLI Integration automatically provides:
+✅ Zero API costs with Pro account
+✅ No API key management required
+✅ Built-in authentication handling
+✅ Process pooling for performance
+✅ Comprehensive error handling
+✅ Automatic Pro account detection
+```
+
+### **Migration from API to CLI**
+Seamlessly migrate existing API configurations:
+
+```bash
+# Automated migration with backup
+claude-flow migrate-api --backup
+
+# Check CLI integration health
+claude-flow doctor
+
+# View provider status
+claude-flow provider status
+```
 
 ### **Auto-MCP Server Setup**
 v2.0.0 Alpha automatically configures MCP servers for seamless Claude Code integration:
@@ -459,6 +499,7 @@ v2.0.0 Alpha automatically configures MCP servers for seamless Claude Code integ
 ✅ claude-flow MCP server configured
 ✅ ruv-swarm MCP server configured  
 ✅ 87 tools available in Claude Code
+✅ CLI provider configured as default
 ✅ --dangerously-skip-permissions set as default
 ```
 
@@ -639,6 +680,11 @@ npx claude-flow@alpha help <command>  # Detailed command help
 - [CLI Commands Guide](docs/CLI.md) - All command-line options
 - [Architecture Overview](docs/ARCHITECTURE.md) - System design and internals
 - [Examples Directory](examples/) - Code examples and demos
+
+### CLI Integration (v2.0.0 New)
+- [🔧 CLI Integration Guide](docs/CLI_INTEGRATION.md) - Complete CLI integration documentation
+- [📋 Migration Guide](docs/MIGRATION_GUIDE.md) - Step-by-step API to CLI migration
+- [🛠️ Diagnostic Commands](docs/CLI_INTEGRATION.md#diagnostic-commands) - Health checks and troubleshooting
 
 ### New Features (v2.0.0)
 - [🔒 Git Checkpoint System](docs/GIT_CHECKPOINT_HOOKS.md) - Automatic Git checkpoints for Claude Code sessions

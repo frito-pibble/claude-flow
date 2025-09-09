@@ -20,6 +20,9 @@ import {
   ClaudeValidationError,
   HealthCheckResult,
 } from './claude-api-errors.js';
+import {
+  CLIErrorHandler,
+} from '../utils/cli-error-handling.js';
 
 // Re-export types from claude-client.ts for compatibility
 export type {
@@ -674,7 +677,14 @@ export class ClaudeCodeCLIClient extends EventEmitter {
             };
           }
           
-          reject(this.createErrorFromCLIResponse(errorResponse));
+          // Enhanced error handling for CLI subprocess errors
+          const cliError = CLIErrorHandler.mapSubprocessError(
+            new Error(stderr || `CLI process exited with code ${code}`),
+            code || undefined,
+            stderr,
+            'CLI completion request'
+          );
+          reject(cliError);
         }
       });
 
@@ -686,7 +696,9 @@ export class ClaudeCodeCLIClient extends EventEmitter {
         
         processInfo.status = 'failed';
         this.cleanupProcess(processInfo);
-        reject(new ClaudeNetworkError(`Failed to spawn CLI process: ${error.message}`));
+        // Map subprocess errors to CLI-specific errors with user guidance
+        const cliError = CLIErrorHandler.mapSubprocessError(error, undefined, undefined, 'spawn CLI process');
+        reject(cliError);
       });
     });
   }
@@ -876,7 +888,7 @@ export class ClaudeCodeCLIClient extends EventEmitter {
   }
 
   /**
-   * Create error from CLI response
+   * Create error from CLI response with enhanced error mapping
    */
   private createErrorFromCLIResponse(response: CLIResponse): ClaudeAPIError {
     if (!response.error) {
@@ -885,6 +897,7 @@ export class ClaudeCodeCLIClient extends EventEmitter {
 
     const { type, message } = response.error;
     
+    // Map CLI-specific errors to enhanced CLI error types
     switch (type) {
       case 'authentication_error':
         return new ClaudeAuthenticationError(message);
@@ -896,6 +909,8 @@ export class ClaudeCodeCLIClient extends EventEmitter {
         return new ClaudeNetworkError(message);
       case 'validation_error':
         return new ClaudeValidationError(message);
+      case 'permission_error':
+        return new ClaudeValidationError(`Permission error: ${message}`);
       case 'internal_error':
         return new ClaudeInternalServerError(message);
       case 'service_unavailable':

@@ -2,6 +2,7 @@
 
 import chalk from 'chalk';
 import { CLIDetector, HealthResult } from '../../utils/cli-detection.js';
+import { CLIErrorHelp } from '../utils/error-help.js';
 import type { Command, CommandContext } from '../cli-core.js';
 
 export const doctorCommand: Command = {
@@ -46,6 +47,8 @@ export const doctorCommand: Command = {
 
       // Exit with appropriate code
       if (!health.available || !health.authenticated) {
+        console.log('\n' + chalk.yellow('⚠️  Health check found issues'));
+        console.log(await CLIErrorHelp.getRecoveryGuidance());
         process.exit(1);
       }
 
@@ -58,7 +61,9 @@ export const doctorCommand: Command = {
           hasProAccount: false
         }, null, 2));
       } else {
-        console.error(chalk.red('❌ Health check failed:'), (error as Error).message);
+        console.error(chalk.red('❌ Health check failed:'));
+        console.error(CLIErrorHelp.formatErrorSummary(error));
+        console.log('\n' + await CLIErrorHelp.getErrorHelp(error, 'doctor'));
       }
       process.exit(1);
     }

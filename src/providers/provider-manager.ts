@@ -41,6 +41,11 @@ import { OllamaProvider } from './ollama-provider.js';
 // Import CLI performance utilities
 import { CLIPerformanceMonitor, CLIPerformanceUtils } from '../utils/cli-performance.js';
 import { CLIDetector } from '../utils/cli-detection.js';
+import {
+  CLIErrorHandler,
+  isCLIError,
+  getCLIGuidanceTemplate,
+} from '../utils/cli-error-handling.js';
 
 export interface ProviderManagerConfig {
   providers: Record<LLMProvider, LLMProviderConfig>;
@@ -498,7 +503,7 @@ export class ProviderManager extends EventEmitter {
 
     // Handle CLI-specific errors with user guidance
     if (failedProvider.name === 'claude-code') {
-      const enhancedError = this.handleCLIProviderError(error);
+      const enhancedError = await this.handleCLIProviderError(error);
       this.logger.error('CLI provider guidance', enhancedError.message);
       
       // For CLI errors, don't automatically fallback - let user decide
@@ -778,48 +783,43 @@ export class ProviderManager extends EventEmitter {
   }
 
   /**
-   * Handle CLI provider errors with user guidance
+   * Handle CLI provider errors with comprehensive user guidance
    */
-  private handleCLIProviderError(error: unknown): Error {
-    let message = 'Claude Code CLI provider failed';
-    let guidance: string[] = [];
-
-    if (error instanceof Error) {
-      const errorMessage = error.message.toLowerCase();
-      
-      if (errorMessage.includes('not authenticated') || errorMessage.includes('auth')) {
-        message = 'Claude Code CLI authentication required';
-        guidance = [
-          'Run "claude auth" to authenticate with your Pro account',
-          'Verify your Pro subscription is active',
-          'Check authentication status with "claude doctor"',
-        ];
-      } else if (errorMessage.includes('not found') || errorMessage.includes('command')) {
-        message = 'Claude Code CLI not found';
-        guidance = [
-          'Install Claude Code CLI: npm install -g @anthropic/claude-code',
-          'Ensure CLI is in your PATH',
-          'Verify installation with "claude --version"',
-        ];
-      } else if (errorMessage.includes('timeout') || errorMessage.includes('timeout')) {
-        message = 'Claude Code CLI request timed out';
-        guidance = [
-          'Check your internet connection',
-          'Verify CLI service is responding with "claude doctor"',
-          'Try again in a few moments',
-        ];
-      } else {
-        guidance = [
-          'Check CLI status with "claude doctor"',
-          'Verify your Pro account is active',
-          'See troubleshooting guide for more help',
-        ];
+  private async handleCLIProviderError(error: unknown): Promise<Error> {
+    // Check if it's already a CLI error with guidance
+    if (isCLIError(error)) {
+      try {
+        const userMessage = await CLIErrorHandler.formatUserMessage(error, false);
+        const enhancedError = new Error(userMessage);
+        enhancedError.name = 'CLIProviderError';
+        return enhancedError;
+      } catch (formattingError) {
+        this.logger.warn('Failed to format CLI error message', formattingError);
       }
     }
 
-    const enhancedError = new Error(`${message}. ${guidance.join(' ')}`);
-    enhancedError.name = 'CLIProviderError';
-    return enhancedError;
+    // For other errors, map them to CLI errors first
+    const cliError = CLIErrorHandler.mapSubprocessError(
+      error instanceof Error ? error : new Error(String(error)),
+      undefined,
+      undefined,
+      'CLI provider operation'
+    );
+
+    try {
+      const userMessage = await CLIErrorHandler.formatUserMessage(cliError, false);
+      const enhancedError = new Error(userMessage);
+      enhancedError.name = 'CLIProviderError';
+      return enhancedError;
+    } catch (formattingError) {
+      this.logger.warn('Failed to format mapped CLI error message', formattingError);
+      
+      // Fallback to template-based guidance
+      const template = getCLIGuidanceTemplate('SETUP_GUIDANCE');
+      const enhancedError = new Error(`Claude Code CLI provider failed: ${error instanceof Error ? error.message : String(error)}\n\n${template}`);
+      enhancedError.name = 'CLIProviderError';
+      return enhancedError;
+    }
   }
 
   /**

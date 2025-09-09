@@ -73,6 +73,46 @@ export interface Config {
     retryAttempts?: number;
     retryDelay?: number;
   };
+  // LLM Provider System Configuration
+  llmProvider?: {
+    // Provider selection and priority
+    defaultProvider?: 'claude-code' | 'anthropic' | 'openai' | 'google' | 'cohere';
+    enableAutoSelection?: boolean;
+    preferCLI?: boolean; // Prefer CLI over API when both available
+    
+    // CLI-specific configuration
+    cli?: {
+      priority?: boolean; // Always prefer CLI when available
+      processPoolSize?: number; // Number of CLI processes to pool
+      processTimeout?: number; // CLI process timeout in ms (default: 60000)
+      maxConcurrentProcesses?: number; // Max concurrent CLI processes
+      enableProcessReuse?: boolean; // Reuse CLI processes for performance
+      cacheHealthChecks?: boolean; // Cache CLI availability checks
+      healthCheckInterval?: number; // Health check cache interval in ms (default: 300000)
+      outputFormat?: 'json' | 'stream-json'; // CLI output format preference
+      fallbackToAPI?: boolean; // Allow fallback to API on CLI failure
+      authCheckInterval?: number; // How often to check CLI auth status
+    };
+    
+    // API fallback configuration
+    fallback?: {
+      enabled?: boolean;
+      providers?: string[]; // Fallback provider order
+      errorThreshold?: number; // Error count before fallback
+      retryDelay?: number; // Delay before retry/fallback
+    };
+    
+    // Cost optimization
+    costOptimization?: {
+      enabled?: boolean;
+      maxCostPerRequest?: number;
+      preferredModels?: string[];
+      budgetLimits?: {
+        daily?: number;
+        monthly?: number;
+      };
+    };
+  };
 }
 
 /**
@@ -135,6 +175,33 @@ const DEFAULT_CONFIG: Config = {
     timeout: 60000,
     retryAttempts: 3,
     retryDelay: 1000,
+  },
+  llmProvider: {
+    defaultProvider: 'claude-code', // Prefer CLI provider by default
+    enableAutoSelection: true,
+    preferCLI: true,
+    cli: {
+      priority: true,
+      processPoolSize: 3,
+      processTimeout: 60000,
+      maxConcurrentProcesses: 5,
+      enableProcessReuse: true,
+      cacheHealthChecks: true,
+      healthCheckInterval: 300000, // 5 minutes
+      outputFormat: 'json',
+      fallbackToAPI: false, // Don't auto-fallback - let user decide
+      authCheckInterval: 3600000, // 1 hour
+    },
+    fallback: {
+      enabled: false, // User controls fallback behavior
+      providers: ['anthropic', 'openai'],
+      errorThreshold: 3,
+      retryDelay: 2000,
+    },
+    costOptimization: {
+      enabled: true,
+      preferredModels: ['claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
+    },
   },
 };
 
@@ -388,6 +455,53 @@ export class ConfigManager {
       if (config.claude.topP !== undefined) {
         if (config.claude.topP < 0 || config.claude.topP > 1) {
           throw new ConfigError('claude.topP must be between 0 and 1');
+        }
+      }
+    }
+    
+    // LLM Provider validation
+    if (config.llmProvider) {
+      if (config.llmProvider.defaultProvider) {
+        const validProviders = ['claude-code', 'anthropic', 'openai', 'google', 'cohere'];
+        if (!validProviders.includes(config.llmProvider.defaultProvider)) {
+          throw new ConfigError(`llmProvider.defaultProvider must be one of: ${validProviders.join(', ')}`);
+        }
+      }
+      
+      // CLI configuration validation
+      if (config.llmProvider.cli) {
+        const cli = config.llmProvider.cli;
+        if (cli.processPoolSize !== undefined && (cli.processPoolSize < 1 || cli.processPoolSize > 10)) {
+          throw new ConfigError('llmProvider.cli.processPoolSize must be between 1 and 10');
+        }
+        if (cli.processTimeout !== undefined && (cli.processTimeout < 1000 || cli.processTimeout > 300000)) {
+          throw new ConfigError('llmProvider.cli.processTimeout must be between 1000 and 300000 ms');
+        }
+        if (cli.maxConcurrentProcesses !== undefined && (cli.maxConcurrentProcesses < 1 || cli.maxConcurrentProcesses > 20)) {
+          throw new ConfigError('llmProvider.cli.maxConcurrentProcesses must be between 1 and 20');
+        }
+        if (cli.healthCheckInterval !== undefined && (cli.healthCheckInterval < 30000 || cli.healthCheckInterval > 3600000)) {
+          throw new ConfigError('llmProvider.cli.healthCheckInterval must be between 30000 and 3600000 ms');
+        }
+        if (cli.outputFormat && !['json', 'stream-json'].includes(cli.outputFormat)) {
+          throw new ConfigError('llmProvider.cli.outputFormat must be either "json" or "stream-json"');
+        }
+        if (cli.authCheckInterval !== undefined && (cli.authCheckInterval < 60000 || cli.authCheckInterval > 86400000)) {
+          throw new ConfigError('llmProvider.cli.authCheckInterval must be between 60000 and 86400000 ms');
+        }
+      }
+      
+      // Cost optimization validation
+      if (config.llmProvider.costOptimization) {
+        const cost = config.llmProvider.costOptimization;
+        if (cost.maxCostPerRequest !== undefined && (cost.maxCostPerRequest < 0 || cost.maxCostPerRequest > 100)) {
+          throw new ConfigError('llmProvider.costOptimization.maxCostPerRequest must be between 0 and 100');
+        }
+        if (cost.budgetLimits?.daily !== undefined && (cost.budgetLimits.daily < 0 || cost.budgetLimits.daily > 10000)) {
+          throw new ConfigError('llmProvider.costOptimization.budgetLimits.daily must be between 0 and 10000');
+        }
+        if (cost.budgetLimits?.monthly !== undefined && (cost.budgetLimits.monthly < 0 || cost.budgetLimits.monthly > 100000)) {
+          throw new ConfigError('llmProvider.costOptimization.budgetLimits.monthly must be between 0 and 100000');
         }
       }
     }
@@ -663,6 +777,117 @@ export class ConfigManager {
   }
 
   /**
+   * Get LLM provider configuration
+   */
+  getLLMProviderConfig() {
+    return this.deepClone(this.config.llmProvider || {});
+  }
+
+  /**
+   * Update LLM provider configuration
+   */
+  setLLMProviderConfig(updates: Partial<Config['llmProvider']>): void {
+    if (!this.config.llmProvider) {
+      this.config.llmProvider = {};
+    }
+    this.config.llmProvider = { ...this.config.llmProvider, ...updates };
+    this.validate(this.config);
+  }
+
+  /**
+   * Get CLI-specific configuration
+   */
+  getCLIConfig() {
+    return this.deepClone(this.config.llmProvider?.cli || {});
+  }
+
+  /**
+   * Update CLI-specific configuration
+   */
+  setCLIConfig(updates: Partial<NonNullable<Config['llmProvider']>['cli']>): void {
+    if (!this.config.llmProvider) {
+      this.config.llmProvider = {};
+    }
+    if (!this.config.llmProvider.cli) {
+      this.config.llmProvider.cli = {};
+    }
+    this.config.llmProvider.cli = { ...this.config.llmProvider.cli, ...updates };
+    this.validate(this.config);
+  }
+
+  /**
+   * Check if CLI provider is preferred
+   */
+  isCLIPreferred(): boolean {
+    return this.config.llmProvider?.preferCLI ?? true;
+  }
+
+  /**
+   * Get default provider
+   */
+  getDefaultProvider(): string {
+    return this.config.llmProvider?.defaultProvider ?? 'claude-code';
+  }
+
+  /**
+   * Check if auto-selection is enabled
+   */
+  isAutoSelectionEnabled(): boolean {
+    return this.config.llmProvider?.enableAutoSelection ?? true;
+  }
+
+  /**
+   * Get CLI process configuration
+   */
+  getCLIProcessConfig() {
+    const cli = this.config.llmProvider?.cli || {};
+    return {
+      poolSize: cli.processPoolSize ?? 3,
+      timeout: cli.processTimeout ?? 60000,
+      maxConcurrent: cli.maxConcurrentProcesses ?? 5,
+      enableReuse: cli.enableProcessReuse ?? true,
+      cacheHealthChecks: cli.cacheHealthChecks ?? true,
+      healthCheckInterval: cli.healthCheckInterval ?? 300000,
+      outputFormat: cli.outputFormat ?? 'json',
+      fallbackToAPI: cli.fallbackToAPI ?? false,
+      authCheckInterval: cli.authCheckInterval ?? 3600000,
+    };
+  }
+
+  /**
+   * Get user config directory (creates if needed)
+   */
+  async getUserConfigDir(): Promise<string> {
+    try {
+      await fs.access(this.userConfigDir);
+    } catch {
+      await fs.mkdir(this.userConfigDir, { recursive: true });
+    }
+    return this.userConfigDir;
+  }
+
+  /**
+   * Create migration configuration for existing API users
+   */
+  createMigrationConfig(): Partial<Config> {
+    const claudeConfig = this.getClaudeConfig();
+    return {
+      llmProvider: {
+        defaultProvider: 'claude-code',
+        preferCLI: true,
+        cli: {
+          priority: true,
+          fallbackToAPI: claudeConfig.apiKey ? true : false, // Allow fallback if API key exists
+        },
+        fallback: {
+          enabled: claudeConfig.apiKey ? true : false,
+          providers: ['anthropic'],
+        },
+      },
+    };
+  }
+
+  /**
    * Deep merge helper
    */
   private deepMerge(target: Config, source: Partial<Config>): Config {
@@ -691,6 +916,9 @@ export class ConfigManager {
     }
     if (source.claude) {
       result.claude = { ...result.claude, ...source.claude };
+    }
+    if (source.llmProvider) {
+      result.llmProvider = { ...result.llmProvider, ...source.llmProvider };
     }
 
     return result;

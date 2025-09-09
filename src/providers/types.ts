@@ -84,6 +84,20 @@ export interface LLMProviderConfig {
   enableCostOptimization?: boolean;
   maxCostPerRequest?: number;
   fallbackModels?: LLMModel[];
+  
+  // CLI-specific options (for claude-code provider)
+  cliOptions?: {
+    priority?: boolean; // Prefer CLI over API when both available
+    processPoolSize?: number; // Number of CLI processes to pool
+    processTimeout?: number; // CLI process timeout in ms
+    maxConcurrentProcesses?: number; // Max concurrent CLI processes
+    enableProcessReuse?: boolean; // Reuse CLI processes for performance
+    cacheHealthChecks?: boolean; // Cache CLI availability checks
+    healthCheckInterval?: number; // Health check cache interval in ms
+    outputFormat?: 'json' | 'stream-json'; // CLI output format preference
+    fallbackToAPI?: boolean; // Allow fallback to API on CLI failure
+    authCheckInterval?: number; // How often to check CLI auth status
+  };
 }
 
 export interface LLMMessage {
@@ -218,6 +232,12 @@ export interface ProviderCapabilities {
       currency: string;
     };
   };
+  
+  // CLI-specific capabilities
+  requiresApiKey?: boolean; // False for CLI providers
+  usesProAccount?: boolean; // True for CLI providers with Pro account
+  supportsCLIFeatures?: boolean; // True for CLI-based providers
+  subprocessOverhead?: number; // Estimated subprocess overhead in ms
 }
 
 // ===== ERROR HANDLING =====

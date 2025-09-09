@@ -1,7 +1,7 @@
 {
-  "name": "claude-flow",
-  "version": "2.0.0-alpha.103",
-  "description": "Enterprise-grade AI agent orchestration with ruv-swarm integration (Alpha Release)",
+  "name": "@benjaminlaya/claude-flow",
+  "version": "2.1.0-cli-integration",
+  "description": "Enterprise-grade AI agent orchestration with Claude Code CLI integration - Zero-cost Pro account usage",
   "main": "cli.mjs",
   "bin": {
     "claude-flow": "bin/claude-flow.js"
@@ -81,12 +81,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ruvnet/claude-code-flow.git"
+    "url": "git+https://github.com/frito-pibble/claude-flow.git"
   },
   "bugs": {
-    "url": "https://github.com/ruvnet/claude-code-flow/issues"
+    "url": "https://github.com/frito-pibble/claude-flow/issues"
   },
-  "homepage": "https://github.com/ruvnet/claude-code-flow#readme",
+  "homepage": "https://github.com/frito-pibble/claude-flow#readme",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=9.0.0"

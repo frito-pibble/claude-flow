@@ -38,6 +38,10 @@ import { GoogleProvider } from './google-provider.js';
 import { CohereProvider } from './cohere-provider.js';
 import { OllamaProvider } from './ollama-provider.js';
 
+// Import CLI performance utilities
+import { CLIPerformanceMonitor, CLIPerformanceUtils } from '../utils/cli-performance.js';
+import { CLIDetector } from '../utils/cli-detection.js';
+
 export interface ProviderManagerConfig {
   providers: Record<LLMProvider, LLMProviderConfig>;
   defaultProvider: LLMProvider;
@@ -68,11 +72,16 @@ export class ProviderManager extends EventEmitter {
   private cache: Map<string, { response: LLMResponse; timestamp: Date }> = new Map();
   private currentProviderIndex = 0;
   private cliAvailabilityCache: { available: boolean; timestamp: Date } | null = null;
+  private performanceMonitor: CLIPerformanceMonitor | null = null;
+  private cliDetector: CLIDetector | null = null;
 
   constructor(logger: ILogger, configManager: ConfigManager, config: ProviderManagerConfig) {
     super();
     this.logger = logger;
     this.config = config;
+
+    // Initialize CLI utilities
+    this.initializeCLIUtilities();
 
     // Initialize providers
     this.initializeProviders();
@@ -80,6 +89,33 @@ export class ProviderManager extends EventEmitter {
     // Start monitoring if enabled
     if (config.monitoring?.enabled) {
       this.startMonitoring();
+    }
+  }
+
+  /**
+   * Initialize CLI detection and performance monitoring utilities
+   */
+  private async initializeCLIUtilities(): Promise<void> {
+    try {
+      // Initialize CLI detector
+      this.cliDetector = new CLIDetector(this.logger, {
+        cacheTimeout: 300000, // 5 minutes
+        healthCheckTimeout: 10000, // 10 seconds
+        authCheckInterval: 900000, // 15 minutes
+      });
+
+      // Initialize CLI performance monitor
+      this.performanceMonitor = CLIPerformanceUtils.createMonitor(this.logger, this.cliDetector);
+
+      // Set up performance monitoring events
+      this.performanceMonitor.on('optimizationSuggestion', (suggestion: string) => {
+        this.logger.info('CLI optimization suggestion', { suggestion });
+        this.emit('optimizationSuggestion', suggestion);
+      });
+
+      this.logger.debug('CLI utilities initialized successfully');
+    } catch (error) {
+      this.logger.warn('Failed to initialize CLI utilities', { error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -407,78 +443,40 @@ export class ProviderManager extends EventEmitter {
 
   /**
    * Check if Claude Code CLI is available and authenticated
-   * Uses caching to avoid repeated subprocess calls
+   * Uses the new CLI detector for comprehensive checking
    */
   private async isCLIAvailable(): Promise<boolean> {
-    // Use cached result if available and recent (5 minutes)
-    if (this.cliAvailabilityCache) {
-      const age = Date.now() - this.cliAvailabilityCache.timestamp.getTime();
-      if (age < 5 * 60 * 1000) { // 5 minutes cache
-        return this.cliAvailabilityCache.available;
-      }
+    if (!this.cliDetector) {
+      this.logger.warn('CLI detector not initialized');
+      return false;
     }
 
     try {
-      // Check CLI availability using 'claude doctor' command
-      const available = await new Promise<boolean>((resolve) => {
-        const child = spawn('claude', ['doctor'], {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          timeout: 10000, // 10 second timeout
-        });
-
-        let stdout = '';
-        let stderr = '';
-
-        child.stdout?.on('data', (data) => {
-          stdout += data.toString();
-        });
-
-        child.stderr?.on('data', (data) => {
-          stderr += data.toString();
-        });
-
-        child.on('close', (code) => {
-          // CLI is available if doctor command succeeds (exit code 0)
-          const isAvailable = code === 0 && !stderr.includes('not authenticated');
-          resolve(isAvailable);
-        });
-
-        child.on('error', () => {
-          // CLI not installed or not in PATH
-          resolve(false);
-        });
-
-        // Timeout fallback
-        setTimeout(() => {
-          child.kill();
-          resolve(false);
-        }, 10000);
-      });
-
-      // Cache the result
-      this.cliAvailabilityCache = {
-        available,
-        timestamp: new Date(),
-      };
-
-      if (available) {
-        this.logger.debug('Claude Code CLI is available and authenticated');
-      } else {
-        this.logger.debug('Claude Code CLI is not available or not authenticated');
-      }
-
-      return available;
+      return await this.cliDetector.isCLIAvailable();
     } catch (error) {
       this.logger.warn('Failed to check CLI availability', error);
-      
-      // Cache negative result to avoid repeated failures
-      this.cliAvailabilityCache = {
-        available: false,
-        timestamp: new Date(),
-      };
-      
       return false;
     }
+  }
+
+  /**
+   * Get CLI performance statistics
+   */
+  getCLIPerformanceStats(): ReturnType<CLIPerformanceMonitor['getComprehensiveStats']> | null {
+    if (!this.performanceMonitor) {
+      return null;
+    }
+    return this.performanceMonitor.getComprehensiveStats();
+  }
+
+  /**
+   * Get CLI optimization recommendations
+   */
+  getCLIOptimizationRecommendations(): ReturnType<CLIPerformanceMonitor['getOptimizationRecommendations']> {
+    if (!this.performanceMonitor) {
+      return [];
+    }
+    return this.performanceMonitor.getOptimizationRecommendations();
   }
 
   /**

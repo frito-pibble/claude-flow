@@ -5,8 +5,8 @@ Replace claude-flow's direct Anthropic API usage with Claude Code CLI subprocess
 
 ## Implementation Status
 - **Start Date**: 2025-09-08
-- **Current Phase**: Planning Complete - Tasks Split for 120k Context
-- **Overall Progress**: 3/14 tasks completed (21%)
+- **Current Phase**: Provider System Integration
+- **Overall Progress**: 4/14 tasks completed (29%)
 - **Original Tasks**: 8 → **Optimized Tasks**: 14
 
 ---
@@ -219,45 +219,65 @@ This will find all relevant API client code, interfaces, and methods across the 
 ---
 
 ### ✅ ❌ Task 4a: Update Provider Manager System
-**Status**: ⏳ Pending  
-**Estimated Time**: 1 hour  
+**Status**: ✅ Completed  
+**Estimated Time**: 1 hour → **Actual Time**: 1.5 hours  
 **Dependencies**: Task 3 completed
 
 **🔍 Required Semantic Searches** (use claude-context):
-1. "ProviderManager class and provider selection logic"
-2. "provider instantiation and initialization patterns"
+1. "ProviderManager class and provider selection logic" ✅
+2. "provider instantiation and initialization patterns" ✅
 
 **Key Implementation Details**:
 1. **Provider Selection Logic**:
    ```typescript
    // Priority: CLI > API (when both available)
-   async selectProvider(): Promise<LLMProvider> {
-     if (await this.isCLIAvailable()) {
-       return 'claude-code';
+   private async selectProvider(request: LLMRequest): Promise<ILLMProvider> {
+     // CLI provider priority: Always prefer CLI when available and authenticated
+     const cliAvailable = await this.isCLIAvailable();
+     if (cliAvailable) {
+       const cliProvider = this.providers.get('claude-code');
+       if (cliProvider && this.isProviderAvailable(cliProvider)) {
+         this.logger.debug('Selected Claude Code CLI provider (priority mode)');
+         return cliProvider;
+       }
      }
-     return 'anthropic'; // fallback
+     // ... existing selection logic
    }
    ```
 
-2. **Provider Manager Updates**:
-   - Update provider instantiation logic
-   - Handle provider switching
-   - Add CLI availability checking
-   - Update error messages
+2. **CLI Availability Detection**:
+   ```typescript
+   private async isCLIAvailable(): Promise<boolean> {
+     // Uses 'claude doctor' command with 5-minute caching
+     // Handles subprocess timeout and error conditions
+     // Returns true only if CLI is installed AND authenticated
+   }
+   ```
 
-**Files to modify**:
-- `src/providers/provider-manager.ts`
-- `src/providers/index.ts`
+**Files Modified**:
+- ✅ `src/providers/provider-manager.ts` - Added CLI support, availability checking, error handling
+- ✅ `src/providers/utils.ts` - Updated default config to prioritize CLI provider
+- ✅ `src/providers/index.ts` - Already exports ClaudeCodeProvider
 
 **Acceptance Criteria**:
-- [ ] Provider manager can instantiate CLI provider
-- [ ] Automatic provider selection works
-- [ ] Type safety maintained
-- [ ] Error messages guide users to proper setup
+- [x] Provider manager can instantiate CLI provider
+- [x] Automatic provider selection works (CLI priority implemented)
+- [x] Type safety maintained (fixed maxCost vs maxCostPerRequest)
+- [x] Error messages guide users to proper setup (getCLISetupGuidance method)
+
+**Implementation Summary**:
+✅ **COMPLETED**: Updated ProviderManager with full CLI integration
+- **CLI Priority**: Always selects CLI when available and authenticated
+- **Smart Caching**: 5-minute cache for CLI availability checks to prevent subprocess overhead
+- **Error Handling**: No auto-fallback for CLI errors - provides user guidance instead
+- **Configuration**: CLI provider now default, included in fallback strategies
+- **User Guidance**: Comprehensive setup instructions and troubleshooting
+- **Files**: provider-manager.ts (enhanced), utils.ts (CLI default config)
 
 **Notes**:
-- CLI always takes priority when available
-- Focus only on provider management logic
+- CLI always takes priority when available ✅
+- No automatic fallbacks from CLI errors - user decides next steps ✅
+- Intelligent subprocess management with caching ✅
 
 ---
 

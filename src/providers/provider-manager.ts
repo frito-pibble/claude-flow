@@ -4,6 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import { ILogger } from '../core/logger.js';
 import { ConfigManager } from '../config/config-manager.js';
 import {
@@ -31,6 +32,7 @@ import {
 
 // Import providers
 import { AnthropicProvider } from './anthropic-provider.js';
+import { ClaudeCodeProvider } from './claude-code-provider.js';
 import { OpenAIProvider } from './openai-provider.js';
 import { GoogleProvider } from './google-provider.js';
 import { CohereProvider } from './cohere-provider.js';
@@ -65,6 +67,7 @@ export class ProviderManager extends EventEmitter {
   private providerMetrics: Map<LLMProvider, ProviderMetrics[]> = new Map();
   private cache: Map<string, { response: LLMResponse; timestamp: Date }> = new Map();
   private currentProviderIndex = 0;
+  private cliAvailabilityCache: { available: boolean; timestamp: Date } | null = null;
 
   constructor(logger: ILogger, configManager: ConfigManager, config: ProviderManagerConfig) {
     super();
@@ -117,6 +120,9 @@ export class ProviderManager extends EventEmitter {
       switch (name) {
         case 'anthropic':
           provider = new AnthropicProvider(providerOptions);
+          break;
+        case 'claude-code':
+          provider = new ClaudeCodeProvider(providerOptions);
           break;
         case 'openai':
           provider = new OpenAIProvider(providerOptions);
@@ -226,6 +232,16 @@ export class ProviderManager extends EventEmitter {
       }
     }
 
+    // CLI provider priority: Always prefer CLI when available and authenticated
+    const cliAvailable = await this.isCLIAvailable();
+    if (cliAvailable) {
+      const cliProvider = this.providers.get('claude-code');
+      if (cliProvider && this.isProviderAvailable(cliProvider)) {
+        this.logger.debug('Selected Claude Code CLI provider (priority mode)');
+        return cliProvider;
+      }
+    }
+
     // Cost optimization
     if (this.config.costOptimization?.enabled && request.costConstraints) {
       const optimized = await this.selectOptimalProvider(request);
@@ -269,8 +285,8 @@ export class ProviderManager extends EventEmitter {
         const estimate = await provider.estimateCost(request);
         
         if (estimate.estimatedCost.total < bestCost &&
-            (!request.costConstraints?.maxCostPerRequest || 
-             estimate.estimatedCost.total <= request.costConstraints.maxCostPerRequest)) {
+            (!request.costConstraints?.maxCost || 
+             estimate.estimatedCost.total <= request.costConstraints.maxCost)) {
           bestCost = estimate.estimatedCost.total;
           bestProvider = provider;
         }
@@ -390,6 +406,82 @@ export class ProviderManager extends EventEmitter {
   }
 
   /**
+   * Check if Claude Code CLI is available and authenticated
+   * Uses caching to avoid repeated subprocess calls
+   */
+  private async isCLIAvailable(): Promise<boolean> {
+    // Use cached result if available and recent (5 minutes)
+    if (this.cliAvailabilityCache) {
+      const age = Date.now() - this.cliAvailabilityCache.timestamp.getTime();
+      if (age < 5 * 60 * 1000) { // 5 minutes cache
+        return this.cliAvailabilityCache.available;
+      }
+    }
+
+    try {
+      // Check CLI availability using 'claude doctor' command
+      const available = await new Promise<boolean>((resolve) => {
+        const child = spawn('claude', ['doctor'], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 10000, // 10 second timeout
+        });
+
+        let stdout = '';
+        let stderr = '';
+
+        child.stdout?.on('data', (data) => {
+          stdout += data.toString();
+        });
+
+        child.stderr?.on('data', (data) => {
+          stderr += data.toString();
+        });
+
+        child.on('close', (code) => {
+          // CLI is available if doctor command succeeds (exit code 0)
+          const isAvailable = code === 0 && !stderr.includes('not authenticated');
+          resolve(isAvailable);
+        });
+
+        child.on('error', () => {
+          // CLI not installed or not in PATH
+          resolve(false);
+        });
+
+        // Timeout fallback
+        setTimeout(() => {
+          child.kill();
+          resolve(false);
+        }, 10000);
+      });
+
+      // Cache the result
+      this.cliAvailabilityCache = {
+        available,
+        timestamp: new Date(),
+      };
+
+      if (available) {
+        this.logger.debug('Claude Code CLI is available and authenticated');
+      } else {
+        this.logger.debug('Claude Code CLI is not available or not authenticated');
+      }
+
+      return available;
+    } catch (error) {
+      this.logger.warn('Failed to check CLI availability', error);
+      
+      // Cache negative result to avoid repeated failures
+      this.cliAvailabilityCache = {
+        available: false,
+        timestamp: new Date(),
+      };
+      
+      return false;
+    }
+  }
+
+  /**
    * Handle request error with fallback
    */
   private async handleRequestError(
@@ -406,7 +498,17 @@ export class ProviderManager extends EventEmitter {
       cost: 0,
     });
 
-    // Try fallback
+    // Handle CLI-specific errors with user guidance
+    if (failedProvider.name === 'claude-code') {
+      const enhancedError = this.handleCLIProviderError(error);
+      this.logger.error('CLI provider guidance', enhancedError.message);
+      
+      // For CLI errors, don't automatically fallback - let user decide
+      // This matches the requirement to not auto-fallback
+      throw enhancedError;
+    }
+
+    // Try fallback for other providers
     const fallbackProvider = await this.getFallbackProvider(error, failedProvider);
     if (fallbackProvider) {
       this.logger.info(`Falling back to ${fallbackProvider.name} provider`);
@@ -496,7 +598,9 @@ export class ProviderManager extends EventEmitter {
     // Cleanup old cache entries
     if (this.cache.size > 1000) {
       const oldestKey = this.cache.keys().next().value;
-      this.cache.delete(oldestKey);
+      if (oldestKey) {
+        this.cache.delete(oldestKey);
+      }
     }
   }
 
@@ -636,6 +740,88 @@ export class ProviderManager extends EventEmitter {
    */
   getAllProviders(): Map<LLMProvider, ILLMProvider> {
     return new Map(this.providers);
+  }
+
+  /**
+   * Get CLI setup guidance for users
+   */
+  getCLISetupGuidance(): {
+    isAvailable: boolean;
+    setupSteps?: string[];
+    troubleshooting?: string[];
+  } {
+    const cacheValid = this.cliAvailabilityCache && 
+      (Date.now() - this.cliAvailabilityCache.timestamp.getTime()) < 5 * 60 * 1000;
+    
+    const isAvailable = cacheValid ? this.cliAvailabilityCache!.available : false;
+
+    if (isAvailable) {
+      return {
+        isAvailable: true,
+      };
+    }
+
+    return {
+      isAvailable: false,
+      setupSteps: [
+        '1. Install Claude Code CLI: npm install -g @anthropic/claude-code',
+        '2. Authenticate with your Pro account: claude auth',
+        '3. Verify setup: claude doctor',
+        '4. Restart claude-flow to detect CLI provider',
+      ],
+      troubleshooting: [
+        'Ensure Claude Code CLI is in your PATH',
+        'Verify you have a Claude Pro subscription',
+        'Check authentication status with "claude doctor"',
+        'Try reinstalling CLI if issues persist',
+        'Contact support if authentication fails with valid Pro account',
+      ],
+    };
+  }
+
+  /**
+   * Handle CLI provider errors with user guidance
+   */
+  private handleCLIProviderError(error: unknown): Error {
+    let message = 'Claude Code CLI provider failed';
+    let guidance: string[] = [];
+
+    if (error instanceof Error) {
+      const errorMessage = error.message.toLowerCase();
+      
+      if (errorMessage.includes('not authenticated') || errorMessage.includes('auth')) {
+        message = 'Claude Code CLI authentication required';
+        guidance = [
+          'Run "claude auth" to authenticate with your Pro account',
+          'Verify your Pro subscription is active',
+          'Check authentication status with "claude doctor"',
+        ];
+      } else if (errorMessage.includes('not found') || errorMessage.includes('command')) {
+        message = 'Claude Code CLI not found';
+        guidance = [
+          'Install Claude Code CLI: npm install -g @anthropic/claude-code',
+          'Ensure CLI is in your PATH',
+          'Verify installation with "claude --version"',
+        ];
+      } else if (errorMessage.includes('timeout') || errorMessage.includes('timeout')) {
+        message = 'Claude Code CLI request timed out';
+        guidance = [
+          'Check your internet connection',
+          'Verify CLI service is responding with "claude doctor"',
+          'Try again in a few moments',
+        ];
+      } else {
+        guidance = [
+          'Check CLI status with "claude doctor"',
+          'Verify your Pro account is active',
+          'See troubleshooting guide for more help',
+        ];
+      }
+    }
+
+    const enhancedError = new Error(`${message}. ${guidance.join(' ')}`);
+    enhancedError.name = 'CLIProviderError';
+    return enhancedError;
   }
 
   /**

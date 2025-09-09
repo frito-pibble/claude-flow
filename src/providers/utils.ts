@@ -28,11 +28,21 @@ export function createProviderManager(
  * Get default provider configuration
  */
 export function getDefaultProviderConfig(): ProviderManagerConfig {
-  const defaultProvider = (process.env.DEFAULT_LLM_PROVIDER as LLMProvider) || 'anthropic';
+  const defaultProvider = (process.env.DEFAULT_LLM_PROVIDER as LLMProvider) || 'claude-code';
   
   return {
     defaultProvider,
     providers: {
+      'claude-code': {
+        provider: 'claude-code',
+        model: 'claude-3-sonnet-20240229',
+        temperature: 0.7,
+        maxTokens: 4096,
+        enableStreaming: true,
+        enableCaching: true,
+        timeout: 60000,
+        retryAttempts: 3,
+      },
       anthropic: {
         provider: 'anthropic',
         apiKey: process.env.ANTHROPIC_API_KEY,
@@ -88,6 +98,28 @@ export function getDefaultProviderConfig(): ProviderManagerConfig {
         timeout: 120000, // Longer timeout for local models
         retryAttempts: 2,
       },
+      'llama-cpp': {
+        provider: 'llama-cpp',
+        apiUrl: process.env.LLAMA_CPP_API_URL || 'http://localhost:8080',
+        model: 'llama-2-7b',
+        temperature: 0.7,
+        maxTokens: 2048,
+        enableStreaming: true,
+        enableCaching: false,
+        timeout: 120000,
+        retryAttempts: 2,
+      },
+      custom: {
+        provider: 'custom',
+        apiUrl: process.env.CUSTOM_API_URL || '',
+        model: 'custom-model',
+        temperature: 0.7,
+        maxTokens: 2048,
+        enableStreaming: false,
+        enableCaching: false,
+        timeout: 60000,
+        retryAttempts: 2,
+      },
     },
     fallbackStrategy: getDefaultFallbackStrategy(),
     loadBalancing: {
@@ -97,7 +129,7 @@ export function getDefaultProviderConfig(): ProviderManagerConfig {
     costOptimization: {
       enabled: true,
       maxCostPerRequest: 1.0, // $1 max per request
-      preferredProviders: ['anthropic', 'openai'],
+      preferredProviders: ['claude-code', 'anthropic', 'openai'],
     },
     caching: {
       enabled: true,
@@ -123,24 +155,24 @@ function getDefaultFallbackStrategy(): FallbackStrategy {
     rules: [
       {
         condition: 'rate_limit',
-        fallbackProviders: ['openai', 'google', 'cohere', 'ollama'],
+        fallbackProviders: ['claude-code', 'anthropic', 'openai', 'google', 'cohere', 'ollama'],
         retryOriginal: true,
         retryDelay: 60000, // 1 minute
       },
       {
         condition: 'unavailable',
-        fallbackProviders: ['openai', 'google', 'anthropic', 'cohere'],
+        fallbackProviders: ['claude-code', 'anthropic', 'openai', 'google', 'cohere'],
         retryOriginal: true,
         retryDelay: 30000, // 30 seconds
       },
       {
         condition: 'timeout',
-        fallbackProviders: ['anthropic', 'openai', 'cohere'],
+        fallbackProviders: ['claude-code', 'anthropic', 'openai', 'cohere'],
         retryOriginal: false,
       },
       {
         condition: 'cost',
-        fallbackProviders: ['ollama', 'cohere', 'google'],
+        fallbackProviders: ['claude-code', 'ollama', 'cohere', 'google'], // CLI has no costs
         retryOriginal: false,
       },
       {
@@ -170,13 +202,16 @@ function loadProviderConfigs(
       config.model = process.env[`${envPrefix}MODEL`] as any;
     }
     if (process.env[`${envPrefix}TEMPERATURE`]) {
-      config.temperature = parseFloat(process.env[`${envPrefix}TEMPERATURE`]);
+      const temp = process.env[`${envPrefix}TEMPERATURE`];
+      if (temp) config.temperature = parseFloat(temp);
     }
     if (process.env[`${envPrefix}MAX_TOKENS`]) {
-      config.maxTokens = parseInt(process.env[`${envPrefix}MAX_TOKENS`], 10);
+      const maxTokens = process.env[`${envPrefix}MAX_TOKENS`];
+      if (maxTokens) config.maxTokens = parseInt(maxTokens, 10);
     }
     if (process.env[`${envPrefix}API_URL`]) {
-      config.apiUrl = process.env[`${envPrefix}API_URL`];
+      const apiUrl = process.env[`${envPrefix}API_URL`];
+      if (apiUrl) config.apiUrl = apiUrl;
     }
   }
   

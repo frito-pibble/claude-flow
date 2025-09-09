@@ -7,14 +7,29 @@ import inquirer from 'inquirer';
 import { Command } from 'commander';
 import { ConfigManager } from '../../config/config-manager.js';
 import { ClaudeAPIClient, ClaudeModel } from '../../api/claude-client.js';
+import { ProviderManager } from '../../providers/provider-manager.js';
 import { Logger } from '../../core/logger.js';
 import { getErrorMessage } from '../../utils/error-handler.js';
 
 export const claudeApiCommand = new Command()
   .name('claude-api')
-  .description('Manage Claude API configuration and test connectivity')
+  .description('Manage Claude LLM providers (CLI-first, API fallback)')
   .action(() => {
-    claudeApiCommand.help();
+    console.log(chalk.blue('🤖 Claude LLM Provider Management\n'));
+    console.log('This command manages both CLI and API providers with CLI taking priority.\n');
+    console.log(chalk.cyan('Available commands:'));
+    console.log('  configure  - Configure Claude API settings (legacy)');
+    console.log('  test       - Test LLM provider connectivity (CLI-first)');
+    console.log('  status     - Show provider status (CLI + API)');
+    console.log('  models     - List available models across providers');
+    console.log('  update     - Update API configuration settings');
+    console.log('');
+    console.log(chalk.yellow('💡 Recommended workflow:'));
+    console.log('  1. Check status: claude-api status');
+    console.log('  2. Setup CLI: npx claude-flow setup-cli');
+    console.log('  3. Test: claude-api test');
+    console.log('');
+    console.log('For CLI-specific management, use: npx claude-flow provider');
   });
 
 // Configure command
@@ -107,9 +122,10 @@ claudeApiCommand
 // Test command
 claudeApiCommand
   .command('test')
-  .description('Test Claude API connectivity')
+  .description('Test Claude/LLM provider connectivity (CLI-first, API fallback)')
   .option('--model <model>', 'Model to test')
   .option('--temperature <temp>', 'Temperature for test', parseFloat)
+  .option('--provider <provider>', 'Force specific provider (claude-code, anthropic)')
   .option(
     '--prompt <prompt>',
     'Test prompt',
@@ -118,31 +134,67 @@ claudeApiCommand
   .action(async (options: any) => {
     try {
       const configManager = ConfigManager.getInstance();
+      const logger = new Logger({ level: 'info', format: 'text', destination: 'console' });
+      
+      // Use ProviderManager instead of direct client instantiation  
+      const providerManager = new ProviderManager(logger, configManager, {
+        providers: {
+          'claude-code': { 
+            provider: 'claude-code',
+            model: 'claude-3-sonnet-20240229'
+          },
+          'anthropic': { 
+            provider: 'anthropic',
+            model: 'claude-3-sonnet-20240229'
+          }
+        },
+        defaultProvider: 'claude-code',
+        costOptimization: {
+          enabled: false
+        }
+      });
 
-      if (!configManager.isClaudeAPIConfigured()) {
-        console.error(chalk.red('❌ Claude API not configured. Run "claude-api configure" first.'));
-        process.exit(1);
+      console.log(chalk.blue('🧪 Testing LLM provider connectivity...'));
+      
+      // Build request with CLI-compatible parameters
+      const testOptions: any = {
+        messages: [{ role: 'user', content: options.prompt }],
+      };
+      
+      // Handle CLI limitations gracefully
+      if (options.model) {
+        testOptions.model = options.model;
+        console.log(chalk.yellow(`⚠️  Model parameter may be ignored by CLI provider`));
+      }
+      if (options.temperature !== undefined) {
+        testOptions.temperature = options.temperature;
+        console.log(chalk.yellow(`⚠️  Temperature parameter may be ignored by CLI provider`));
+      }
+      
+      // Force specific provider if requested
+      if (options.provider) {
+        testOptions.preferredProvider = options.provider;
+        console.log(chalk.blue(`🎯 Using provider: ${options.provider}`));
       }
 
-      console.log(chalk.blue('🧪 Testing Claude API connectivity...'));
-
-      const logger = new Logger({ level: 'info', format: 'text', destination: 'console' });
-      const client = new ClaudeAPIClient(logger, configManager);
-
-      const testOptions: any = {};
-      if (options.model) testOptions.model = options.model;
-      if (options.temperature !== undefined) testOptions.temperature = options.temperature;
-
       const start = Date.now();
-      const response = await client.complete(options.prompt, testOptions);
+      const response = await providerManager.complete(testOptions);
       const duration = Date.now() - start;
 
-      console.log(chalk.green('✅ Claude API test successful!'));
+      console.log(chalk.green('✅ LLM provider test successful!'));
       console.log(chalk.gray(`Duration: ${duration}ms`));
+      console.log(chalk.gray(`Provider used: ${response.provider || 'unknown'}`));
+      if (response.model) {
+        console.log(chalk.gray(`Model: ${response.model}`));
+      }
       console.log(chalk.cyan('\nResponse:'));
-      console.log(response);
+      console.log(response.content);
     } catch (error) {
-      console.error(chalk.red('❌ Claude API test failed:'), getErrorMessage(error));
+      console.error(chalk.red('❌ LLM provider test failed:'), getErrorMessage(error));
+      console.log(chalk.yellow('\n💡 Troubleshooting:'));
+      console.log('  • Check CLI installation: npx claude-flow doctor');
+      console.log('  • Configure provider: npx claude-flow provider');
+      console.log('  • Setup CLI: npx claude-flow setup-cli');
       process.exit(1);
     }
   });
@@ -150,14 +202,67 @@ claudeApiCommand
 // Status command
 claudeApiCommand
   .command('status')
-  .description('Show Claude API configuration status')
+  .description('Show LLM provider configuration status (CLI + API)')
   .action(async () => {
     try {
       const configManager = ConfigManager.getInstance();
+      const logger = new Logger({ level: 'info', format: 'text', destination: 'console' });
+      
+      // Use ProviderManager to get comprehensive status
+      const providerManager = new ProviderManager(logger, configManager, {
+        providers: {
+          'claude-code': { 
+            provider: 'claude-code',
+            model: 'claude-3-sonnet-20240229'
+          },
+          'anthropic': { 
+            provider: 'anthropic',
+            model: 'claude-3-sonnet-20240229'
+          }
+        },
+        defaultProvider: 'claude-code',
+        costOptimization: {
+          enabled: false
+        }
+      });
+
+      console.log(chalk.blue('🤖 LLM Provider Status\n'));
+
+      // Show current provider configuration
+      const llmConfig = configManager.getLLMProviderConfig();
+      const currentProvider = llmConfig.defaultProvider || 'claude-code';
+      
+      console.log(chalk.cyan('Current Configuration:'));
+      console.log(`Default Provider: ${chalk.green(currentProvider)}`);
+      
+      // CLI Provider Status
+      console.log(chalk.cyan('\n🖥️  CLI Provider (claude-code):'));
+      try {
+        const { cliUtils } = await import('../../utils/cli-detection.js');
+        const isReady = await cliUtils.isReady();
+        
+        if (isReady) {
+          console.log(chalk.green('✅ Available and authenticated'));
+          console.log(chalk.gray('Account type: Pro (no usage costs)'));
+        } else {
+          console.log(chalk.yellow('⚠️  Not ready'));
+          console.log(chalk.gray('Run: npx claude-flow setup-cli'));
+        }
+        
+        // Get additional health info
+        const healthCheck = await cliUtils.healthCheck();
+        if (!healthCheck.ok) {
+          console.log(chalk.yellow(`⚠️  ${healthCheck.message}`));
+        }
+      } catch (error) {
+        console.log(chalk.red('❌ Error checking CLI status'));
+        console.log(chalk.gray('Install: https://claude.ai/code'));
+      }
+
+      // API Provider Status
+      console.log(chalk.cyan('\n🌐 API Provider (anthropic):'));
       const config = configManager.getClaudeConfig();
       const isConfigured = configManager.isClaudeAPIConfigured();
-
-      console.log(chalk.blue('🤖 Claude API Status\n'));
 
       if (isConfigured) {
         console.log(chalk.green('✅ Configured'));
@@ -175,6 +280,16 @@ claudeApiCommand
         console.log(chalk.red('❌ Not configured'));
         console.log(chalk.gray('Run "claude-api configure" to set up Claude API.'));
       }
+
+      // Show provider priority
+      console.log(chalk.cyan('\nProvider Priority:'));
+      if (llmConfig.fallback?.providers) {
+        console.log(`Fallback order: ${chalk.yellow(llmConfig.fallback.providers.join(' → '))}`);
+      } else {
+        console.log(`Single provider: ${chalk.yellow(currentProvider)}`);
+      }
+      
+      console.log(chalk.gray('\nFor more details: npx claude-flow provider'));
     } catch (error) {
       console.error(chalk.red('❌ Failed to get status:'), getErrorMessage(error));
       process.exit(1);
@@ -184,9 +299,19 @@ claudeApiCommand
 // Models command
 claudeApiCommand
   .command('models')
-  .description('List available Claude models')
+  .description('List available Claude models across providers')
   .action(() => {
-    console.log(chalk.blue('📋 Available Claude Models\n'));
+    console.log(chalk.blue('📋 Available Claude Models Across Providers\n'));
+
+    console.log(chalk.cyan('🖥️  CLI Provider (claude-code):'));
+    console.log(chalk.gray('Models available via Claude Code CLI (Pro account):'));
+    console.log('  • All current Claude models available');
+    console.log('  • Model selection via --model flag (may be ignored)');
+    console.log('  • No usage costs with Pro account');
+    console.log('  • Automatic model selection by Claude Code\n');
+
+    console.log(chalk.cyan('🌐 API Provider (anthropic):'));
+    console.log(chalk.gray('Models available via Anthropic API:\n'));
 
     const models = [
       {
@@ -228,10 +353,15 @@ claudeApiCommand
     ];
 
     models.forEach((model) => {
-      console.log(chalk.cyan(`${model.name} (${model.id})`));
-      console.log(chalk.gray(`  ${model.description}`));
-      console.log(chalk.gray(`  Context: ${model.contextWindow}\n`));
+      console.log(chalk.cyan(`  ${model.name} (${model.id})`));
+      console.log(chalk.gray(`    ${model.description}`));
+      console.log(chalk.gray(`    Context: ${model.contextWindow}\n`));
     });
+
+    console.log(chalk.yellow('💡 Provider Notes:'));
+    console.log('• CLI provider: Best for Pro users (no costs, latest models)');
+    console.log('• API provider: Direct control over model selection and parameters');
+    console.log('• Default: CLI provider takes priority when available');
   });
 
 // Update command

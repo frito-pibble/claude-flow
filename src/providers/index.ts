@@ -9,6 +9,7 @@ export * from './types.js';
 // Export providers
 export { BaseProvider } from './base-provider.js';
 export { AnthropicProvider } from './anthropic-provider.js';
+export { ClaudeCodeProvider } from './claude-code-provider.js';
 export { OpenAIProvider } from './openai-provider.js';
 export { GoogleProvider } from './google-provider.js';
 export { CohereProvider } from './cohere-provider.js';

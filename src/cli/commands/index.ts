@@ -17,6 +17,12 @@ import { createMigrateCommand } from './migrate.js';
 import { enterpriseCommands } from './enterprise.js';
 import { createFlowNexusClaudeMd } from '../simple-commands/init/templates/claude-md.js';
 
+// Import new diagnostic commands
+import { doctorCommand } from './doctor.js';
+import { setupCliCommand } from './setup-cli.js';
+import { configProviderCommand } from './config-provider.js';
+import { migrateApiCommand } from './migrate-api.js';
+
 // Import enhanced orchestration commands
 import { startCommand } from './start.js';
 import { statusCommand } from './status.js';
@@ -737,8 +743,8 @@ export function setupCommands(cli: CLI): void {
             if (health.mcp) {
               const config = await getConfigManager();
               const mcpConfig = config.get().mcp;
-              console.log(`📍 Address: ${mcpConfig.host}:${mcpConfig.port}`);
-              console.log(`🔐 Authentication: ${mcpConfig.auth ? 'Enabled' : 'Disabled'}`);
+              console.log(`📍 Address: localhost:${mcpConfig?.port || 3000}`);
+              console.log(`🔐 Authentication: ${mcpConfig?.enabled ? 'Enabled' : 'Disabled'}`);
               console.log(`🔧 Tools: Available`);
               console.log(`📊 Metrics: Collecting`);
             }
@@ -2467,6 +2473,16 @@ Now, please proceed with the task: ${task}`;
   for (const command of enterpriseCommands) {
     cli.command(command);
   }
+
+  // Add new diagnostic commands for CLI integration
+  cli.command(doctorCommand as any);
+  cli.command(setupCliCommand as any);
+  cli.command(migrateApiCommand as any);
+  
+  // Add config provider command - using 'provider' as the name since 'config' already exists
+  const providerCommand = { ...configProviderCommand };
+  (providerCommand as any).name = 'provider';
+  cli.command(providerCommand as any);
 }
 
 function getCapabilitiesForType(type: string): string[] {
